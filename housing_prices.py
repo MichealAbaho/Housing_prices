@@ -6,12 +6,19 @@ Created on Wed Oct  3 12:50:14 2018
 """
 import pandas as pd
 import numpy as np
-from sklearn import linear_model
-from sklearn.preprocessing import Imputer, LabelEncoder
+from sklearn.linear_model import Lasso, ElasticNet
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.pipeline import make_pipeline
+from sklearn.base import BaseEstimator, TransformerMixin, RegressorMixin, clone
+from sklearn.preprocessing import Imputer, LabelEncoder, RobustScaler, StandardScaler
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import KFold, cross_val_score
 import scipy.stats as st
 import scipy.special as st2
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 
 class housing_prices:
     
@@ -166,7 +173,8 @@ class housing_prices:
     
     def clean_data(self):
         train, test = self.__train_dset, self.__test_dset
-        print(train.shape, test.shape)
+        n_train = train.shape[0]
+        n_test = test.shape[0]
         
         #tranforming the SalePrice Variable to achieve normality
         train['SalePrice'] = np.log(train['SalePrice'])
@@ -174,38 +182,43 @@ class housing_prices:
         #concatenate the two datasets
         data = pd.concat([train, test])
         data.set_index('Id', inplace=True)
-# =============================================================================
-#         mis_per_col = train.isnull().sum().sort_values(ascending=False)
-#         percent = (train.isnull().sum()/train.isnull().count())*100
-#         missing = pd.concat([mis_per_col, percent], keys=['missing', 'percent'], axis=1)
-#         #dropping missing values 
-#         cols_to_drop = missing[missing['missing'] > 1].index
-#         train.drop(list(cols_to_drop), axis=1, inplace=True)
-#         train.drop(train.loc[train['Electrical'].isnull()].index, inplace=True)
-#         
-#         #transforming TotalBsmtSF   
-#         train['hasbmt'] = pd.Series(len(train['TotalBsmtSF']), index=train.index)
-#         train['hasbmt'] = 0
-#         train.loc[train['TotalBsmtSF'] > 0, 'hasbmt'] = 1
-#         train.loc[train['hasbmt'] == 1, 'TotalBsmtSF'] = np.log(train['TotalBsmtSF'])
-#         train.drop(['hasbmt'], axis=1)
-#         #transforming the categroical vars through label encoding and fixing the skewness in the numerical variables using boxcox
-#         qual_vars = [col for col in train.columns if train.dtypes[col] == object]
-#         l_encoder = LabelEncoder()
-#         
-#         quan_vars = [col for col in train.columns if col not in qual_vars]
-#         quan_vars_transform = [col for col in quan_vars if st.skew(train[col]) > 0.75]
-#         
-#         for cat_col in qual_vars:
-#             train[cat_col] = l_encoder.fit_transform(list(train[cat_col].values))
-#         
-#         train[quan_vars_transform] = np.log1p(train[quan_vars_transform])
-# =============================================================================
+        print(data.shape)
+        #check for missing values and drop them
+        mis_per_col = data.isnull().sum().sort_values(ascending=False)
+        percent = (data.isnull().sum()/data.isnull().count())*100
+        missing = pd.concat([mis_per_col, percent], keys=['missing', 'percent'], axis=1)
+       
+        cols_to_drop = missing[missing['missing'] > 1].index
+        data.drop(list(cols_to_drop), axis=1, inplace=True)
+        data.drop(data.loc[data['Electrical'].isnull()].index, inplace=True)
+        print(data.shape)
+        
+        #transforming the categroical vars through label encoding and fixing the skewness in the numerical variables using boxcox
+        qual_vars = [col for col in data.columns if data.dtypes[col] == object]
+        l_encoder = LabelEncoder()
+        
+        quan_vars = [col for col in data.columns if col not in qual_vars]
+        quan_vars_transform = [col for col in quan_vars if st.skew(data[col]) > 0.75]
+        
+        for cat_col in qual_vars:
+            data[cat_col] = data[cat_col].astype(str)
+            data[cat_col] = l_encoder.fit_transform(list(data[cat_col].values))
+        
+        data[quan_vars_transform] = np.log1p(data[quan_vars_transform])
+        print(data.shape)
+        
+        clean_data = pd.get_dummies(data)
+        
+        train_data, test_data = clean_data[:n_train], clean_data[n_train:]
+        
+        return (train_data, test_data)
 # =============================================================================
 #         for num_col in quan_vars_transform:
 #             train[num_col] = st.boxcox(train[num_col])
 # =============================================================================
-                
+    
+    
+        
             
 x = housing_prices('H:/Mykel/Github/Housing_prices/train.csv', 'H:/Mykel/Github/Housing_prices/test.csv')
-x.clean_data()
+x.data_prep()
