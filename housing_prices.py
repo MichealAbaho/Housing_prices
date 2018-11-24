@@ -12,12 +12,13 @@ from sklearn.kernel_ridge import KernelRidge
 from sklearn.pipeline import make_pipeline
 from sklearn.base import BaseEstimator, TransformerMixin, RegressorMixin, clone
 from sklearn.preprocessing import Imputer, LabelEncoder, RobustScaler, StandardScaler
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import KFold, cross_val_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.model_selection import KFold, cross_val_score, train_test_split, GridSearchCV
 import scipy.stats as st
 import scipy.special as st2
 import matplotlib.pyplot as plt
 import seaborn as sns
+#import xgboost as xgb
 
 
 class housing_prices:
@@ -103,6 +104,8 @@ class housing_prices:
         sns.heatmap(cm, square=True, cbar=True, annot=True,fmt='.2f', xticklabels=cols.values, yticklabels=cols.values)
         plt.show()
         
+        
+        
         #check normality of dependent variable
         sns.distplot(train.SalePrice, kde=True, fit=st.norm)
         fig = plt.figure()
@@ -111,11 +114,13 @@ class housing_prices:
         #check normality of independent variables
         sns.distplot(train.GrLivArea, kde=True, fit=st.norm)
         fig = plt.figure()
-        fig = st.probplot(train.GrLivAreae, plot=plt)
+        fig = st.probplot(train.GrLivArea, plot=plt)
         
         sns.distplot(train.TotalBsmtSF, kde=True, fit=st.norm)
         fig = plt.figure()
         fig = st.probplot(train.TotalBsmtSF, plot=plt)
+        
+        
         return missing
         
         
@@ -162,6 +167,20 @@ class housing_prices:
         g = sns.FacetGrid(f, col="variable",  col_wrap=2, sharex=False, sharey=False, size=5)
         g.map(sns.boxplot, 'value', 'SalePrice')
         
+        #update numerical variables
+        num_vars = [var for var in train_set.columns if train_set[var].dtypes != object]
+        normality_dict = {}
+        alpha = 0.01
+        for var in num_vars:
+            if(var != 'Id'):
+                stat, p_value = sp.shapiro(train_set[var])
+                if(p_value < alpha):
+                    normality_dict[var] = True
+                else:
+                    normality_dict[var] = False
+        normality_table = pd.DataFrame([(key, round(value,5)) for key, value in normality_dict.items()], columns=['Factor', 'Normal-Distribution'])
+        normality_table
+        
         def boxplot(x,y,**kwargs):
             sns.boxplot(x=x,y=y)
             x=plt.xticks(rotation=90)
@@ -172,53 +191,103 @@ class housing_prices:
         #quantitative_vars = [var for var in self.__train_dset if self.__train_dset.dtypes[var] != object and var != 'Id']
     
     def clean_data(self):
-        train, test = self.__train_dset, self.__test_dset
-        n_train = train.shape[0]
-        n_test = test.shape[0]
+        train_set, test_set = self.__train_dset, self.__test_dset
+        n_train = train_set.shape[0]
+        n_test = test_set.shape[0]
         
         #tranforming the SalePrice Variable to achieve normality
-        train['SalePrice'] = np.log(train['SalePrice'])
-        
-        #concatenate the two datasets
-        data = pd.concat([train, test])
-        data.set_index('Id', inplace=True)
-        print(data.shape)
-        #check for missing values and drop them
-        mis_per_col = data.isnull().sum().sort_values(ascending=False)
-        percent = (data.isnull().sum()/data.isnull().count())*100
-        missing = pd.concat([mis_per_col, percent], keys=['missing', 'percent'], axis=1)
+        train_set['SalePrice'] = np.log(train_set['SalePrice'])
+        #fig = plt.figure()
+        #res = st.probplot(train_set['SalePrice'], plot=plt)
        
-        cols_to_drop = missing[missing['missing'] > 1].index
-        data.drop(list(cols_to_drop), axis=1, inplace=True)
-        data.drop(data.loc[data['Electrical'].isnull()].index, inplace=True)
-        print(data.shape)
+        #concatenate the two datasets  
+        data = pd.concat([train_set, test_set]).reset_index(drop=True)
+       
+       #dealing with missing values 
+        missing_largest = (train_set.isnull().sum()/train_set.count())*100
+        cols_to_drop = list(missing_largest[missing_largest>50].index)
+        data.drop(cols_to_drop, axis=1, inplace=True)
+        print('The data set is left with {} columns out of the original {}'.format(data.shape[1], train_set.shape[1]))
         
-        #transforming the categroical vars through label encoding and fixing the skewness in the numerical variables using boxcox
-        qual_vars = [col for col in data.columns if data.dtypes[col] == object]
-        l_encoder = LabelEncoder()
+        #Now let's try and fill in missing values of those  
+        for i in ['LotFrontage','MasVnrArea','BsmtFinSF1','BsmtFinSF2','BsmtUnfSF','TotalBsmtSF','BsmtFullBath','GarageCars','GarageArea','GarageYrBlt','BsmtHalfBath']:
+            data[i].fillna(0, inplace=True)
+        #data.drop(['Utilities'], axis=1, inplace=True) 
+        for i in ['MSZoning','Exterior1st','Exterior2nd','MasVnrType', 'BsmtQual', 'BsmtCond', 'BsmtExposure', 'BsmtFinType1','GarageCond','SaleType',
+                 'BsmtFinType2','Electrical','KitchenQual', 'GarageType','GarageFinish','Functional','GarageQual']:
+            data[i].fillna('None', inplace=True)
+        #Utilities contains only one value i.e. AllPub, which essentially isn't adding that much information to us
+        data.drop(['Utilities'], axis=1, inplace=True)
         
-        quan_vars = [col for col in data.columns if col not in qual_vars]
-        quan_vars_transform = [col for col in quan_vars if st.skew(data[col]) > 0.75]
+        #transforming the categroical vars through label encoding
+        cat_cols = data.dtypes[data.dtypes == object].index
+        data[list(cat_cols)] = data[list(cat_cols)].transform(lambda x: encod(x))
+
+        #normalize the numerical attributes
+        num_cols = data.dtypes[data.dtypes == int].index
         
-        for cat_col in qual_vars:
-            data[cat_col] = data[cat_col].astype(str)
-            data[cat_col] = l_encoder.fit_transform(list(data[cat_col].values))
-        
-        data[quan_vars_transform] = np.log1p(data[quan_vars_transform])
-        print(data.shape)
-        
-        clean_data = pd.get_dummies(data)
-        
+        data[list(num_cols)] = data[list(num_cols)].apply(lambda x: normalizing(x))
+        clean_data = pd.get_dummies(data)    
         train_data, test_data = clean_data[:n_train], clean_data[n_train:]
         
-        return (train_data, test_data)
-# =============================================================================
-#         for num_col in quan_vars_transform:
-#             train[num_col] = st.boxcox(train[num_col])
-# =============================================================================
+        return (train_data, train_set['SalePrice'], test_data)
     
-    
+    def modelling(self):
+        #cross validation
+        y_values = self.clean_data()[1].values
+        X_train, X_test, Y_train, Y_test = train_test_split(self.clean_data()[0].values,
+                                                            y_values,
+                                                            test_size=0.2)
+        mods = {'rf':RandomForestRegressor(),
+                'gb':GradientBoostingRegressor(learning_rate=[0.1])}
         
+        final_models = []
+        for model_label, model in mods.items():
+            un_tuned_batch = un_tuned_models(model, X_train.values, Y_train.values, X_test.values)
+            train_error = un_tuned_batch[1].mean()
+            test_error = np.sqrt(mean_squared_error(Y_test.values, un_tuned_batch[0], multioutput='uniform_average'))
+            print(model_label)
+            print('Root mean squared error during training: {}'.format(train_error))
+            print('Root mean squared error during prediction: {}'.format(test_error))
             
+            tuned_batch = tuned_models(model, X_train.values, Y_train.values, X_test.values)
+            train_error = tuned_batch[1].mean()
+            test_error = np.sqrt(mean_squared_error(Y_test, tuned_batch[0], multioutput='uniform_average'))
+            print(model_label)
+            print('Root mean squared error during training: {}'.format(train_error))
+            print('Root mean squared error during prediction: {}'.format(test_error))
+            
+        
+        
+    
+def un_tuned_models(model, x_train, y_train, xtest):
+    train_model = model.fit(x_train, y_train)
+    y_pred = train_model.predict(xtest)
+    rmse = np.sqrt(-cross_val_score(model, x_train, y_train, scoring='neg_mean_squared_error', cv=5))
+    return y_pred, rmse
+        
+
+def tuned_models(model, x_train, y_train, xtest):
+    param={'n_estimators':[100, 500, 1000, 2000], 'max_depth':[10, 15, 20, 25]}
+    gs = GridSearchCV(model, param, cv=5, n_jobs=-1)
+    gs_model = gs.fit(x_train, y_train)
+    y_pred = gs_model.predict(xtest)
+    rmse = np.sqrt(-cross_val_score(gs_model, y_train, scoring='neg_mean_squared_error',cv=5))
+    print (pd.DataFrame(gs_model.cv_results_).sort_values('mean_test_score', ascending=False)[0:5])
+    print (gs_model.best_params_)
+    d = gs_model.best_params_
+    return y_pred, rmse
+
+def encod(elem):
+    lb = LabelEncoder()
+    encod = lb.fit_transform(elem)
+    return encod
+
+#normalize variables
+def normalizing(frame):
+    normalised_dset = np.log1p(frame)
+    return normalised_dset
+        
+#chicken()           
 x = housing_prices('H:/Mykel/Github/Housing_prices/train.csv', 'H:/Mykel/Github/Housing_prices/test.csv')
-x.data_prep()
+x.modelling()
