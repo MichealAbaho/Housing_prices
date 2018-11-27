@@ -201,39 +201,40 @@ class housing_prices:
         
         #tranforming the SalePrice Variable to achieve normality
         train_set['SalePrice'] = np.log(train_set['SalePrice'])
-        #fig = plt.figure()
-        #res = st.probplot(train_set['SalePrice'], plot=plt)
-       
-        #concatenate the two datasets  
+        fig = plt.figure()
+        res = st.probplot(train_set['SalePrice'], plot=plt)
+        plt.show()
+
+        #concatenate the two datasets
         data = pd.concat([train_set, test_set]).reset_index(drop=True)
-       
-       #dealing with missing values 
+
+        #dealing with missing values, dropping all variables missing over 50% of their data
         missing_largest = (train_set.isnull().sum()/train_set.count())*100
         cols_to_drop = list(missing_largest[missing_largest>50].index)
         data.drop(cols_to_drop, axis=1, inplace=True)
         print('The data set is left with {} columns out of the original {}'.format(data.shape[1], train_set.shape[1]))
-        
-        #Now let's try and fill in missing values of those  
+
+        #Now let's try and fill in missing values of those
         for i in ['LotFrontage','MasVnrArea','BsmtFinSF1','BsmtFinSF2','BsmtUnfSF','TotalBsmtSF','BsmtFullBath','GarageCars','GarageArea','GarageYrBlt','BsmtHalfBath']:
             data[i].fillna(0, inplace=True)
-        #data.drop(['Utilities'], axis=1, inplace=True) 
+        #data.drop(['Utilities'], axis=1, inplace=True)
         for i in ['MSZoning','Exterior1st','Exterior2nd','MasVnrType', 'BsmtQual', 'BsmtCond', 'BsmtExposure', 'BsmtFinType1','GarageCond','SaleType',
                  'BsmtFinType2','Electrical','KitchenQual', 'GarageType','GarageFinish','Functional','GarageQual']:
             data[i].fillna('None', inplace=True)
         #Utilities contains only one value i.e. AllPub, which essentially isn't adding that much information to us
         data.drop(['Utilities'], axis=1, inplace=True)
-        
+
         #transforming the categroical vars through label encoding
         cat_cols = data.dtypes[data.dtypes == object].index
         data[list(cat_cols)] = data[list(cat_cols)].transform(lambda x: encod(x))
 
         #normalize the numerical attributes
         num_cols = data.dtypes[data.dtypes == int].index
-        
+
         data[list(num_cols)] = data[list(num_cols)].apply(lambda x: normalizing(x))
-        clean_data = pd.get_dummies(data)    
+        clean_data = pd.get_dummies(data)
         train_data, test_data = clean_data[:n_train], clean_data[n_train:]
-        
+
         return (train_data, train_set['SalePrice'], test_data)
     
     def modelling(self):
@@ -242,18 +243,17 @@ class housing_prices:
         X_train, X_test, Y_train, Y_test = train_test_split(self.clean_data()[0].values,
                                                             y_values,
                                                             test_size=0.2)
-        mods = {'rf':RandomForestRegressor(),
-                'gb':GradientBoostingRegressor(learning_rate=0.1)}
+        mods = {'random-forest model':RandomForestRegressor(),
+                'gradient-boosting model':GradientBoostingRegressor(learning_rate=0.1)}
         
-        final_models = []
+        final_models_params = []
 
         for model_label, model in mods.items():
             un_tuned_batch = un_tuned_models(model, X_train, Y_train, X_test)
             train_error = un_tuned_batch[1].mean()
             test_error = mean_squared_error(Y_test, un_tuned_batch[0], multioutput='uniform_average')
             print(model_label)
-            print('mean squared error during training: {}'.format(train_error))
-            print('mean squared error during prediction: {}'.format(test_error))
+            print('mean squared error during prediction: {}'.format(test_error) + '\n')
 
             tuned_batch = tuned_models(model, X_train, Y_train, X_test)
             train_error = tuned_batch[1].mean()
@@ -261,11 +261,16 @@ class housing_prices:
             print(model_label + 'Tuned-parameters')
             print('mean squared error during training: {}'.format(train_error))
             print('mean squared error during prediction: {}'.format(test_error))
-            print('Best parameters: {}'.format(tuned_batch()[2]))
+            print('Best parameters: {}'.format(tuned_batch[2]) + '\n')
 
-        
-        
-    
+            final_models_params.append(tuned_batch[2])
+
+        return final_models_params
+
+    def model_selection(self):
+
+
+
 def un_tuned_models(model, x_train, y_train, xtest):
     train_model = model.fit(x_train, y_train)
     y_pred = train_model.predict(xtest)
@@ -274,7 +279,7 @@ def un_tuned_models(model, x_train, y_train, xtest):
         
 
 def tuned_models(model, x_train, y_train, xtest):
-    param={'n_estimators':[100, 500], 'max_depth':[None, 10, 15]}
+    param={'n_estimators':[100, 500, 1500], 'max_depth':[None, 10, 15, 20]}
     gs = GridSearchCV(model, param, cv=5, n_jobs=-1)
     gs_model = gs.fit(x_train, y_train)
     y_pred = gs_model.predict(xtest)
@@ -291,6 +296,7 @@ def normalizing(frame):
     normalised_dset = np.log1p(frame)
     return normalised_dset
         
-#chicken()           
-x = housing_prices('train.csv', 'test.csv')
-x.modelling()
+#chicken()
+if __name__ == '__main__':
+    x = housing_prices('train.csv', 'test.csv')
+    x.modelling()
